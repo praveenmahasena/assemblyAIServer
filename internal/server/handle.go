@@ -1,10 +1,10 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -29,28 +29,39 @@ func NewResponse(s int, d string) TCPResponse {
 	}
 }
 
-func (t TCPResponse)WriteTo(con net.Conn){
-	data,dataErr:=json.Marshal(t)
-	if dataErr!=nil{
-		con.Write([]byte("Error"))
+func (t TCPResponse) WriteTo(con net.Conn) {
+	data, dataErr := json.Marshal(t)
+	if dataErr != nil {
+		_, err := con.Write([]byte("Error"))
+		fmt.Println(err)
 		return
 	}
-	con.Write(data)
+	_, err := con.Write(data)
+	fmt.Println(err)
 }
 
 type Res struct {
 	Upload_url string `json:"upload_url"`
 }
 
+ type t []byte
+ func (t t)Write(b []byte)(int,error){
+	fmt.Println(len(b))
+	t=b
+	return 0,nil
+ }
+
 func handle(con net.Conn) {
 	defer con.Close()
 
-	s := bufio.NewScanner(con)
-	s.Scan()
-	fb := s.Bytes()
 
-	link, err := upLoadFile(fb)
+	b,err:=io.ReadAll(con)
+	os.WriteFile("2.mp3",b,0777)
+
+
+	link, err := upLoadFile(nil)
 	if err != nil {
+		fmt.Println(err)
 		r := NewResponse(http.StatusInternalServerError, err.Error())
 		r.WriteTo(con)
 		return
@@ -58,43 +69,44 @@ func handle(con net.Conn) {
 
 	transcriptionID, transcriptionIDErr := getTranScriptID(link)
 	if transcriptionIDErr != nil {
+		fmt.Println(transcriptionIDErr)
 		r := NewResponse(http.StatusInternalServerError, transcriptionIDErr.Error())
 		r.WriteTo(con)
 		return
 	}
 	transcription, transcriptionErr := getTranScript(transcriptionID)
 	if transcriptionErr != nil {
+		fmt.Println(transcriptionErr)
 		r := NewResponse(http.StatusInternalServerError, transcriptionErr.Error())
 		r.WriteTo(con)
 		return
 	}
-	r := NewResponse(http.StatusInternalServerError, transcription)
+	r := NewResponse(http.StatusOK, transcription)
+	fmt.Println(r)
 	r.WriteTo(con)
 }
 
 /* write docs for lsp */
 func upLoadFile(fb []byte) (string, error) {
+	fmt.Println(fb, "85")
 	mediaLink := os.Getenv(mediauploadlinkParam)
 	token := os.Getenv(tokenParam)
 	req, reqErr := http.NewRequest(http.MethodPost, mediaLink, bytes.NewReader(fb))
 	req.Header.Add("Authorization", token)
-	req.Header.Add("Content-Type" ,"application/octet-stream")
-	fmt.Println(req,reqErr,mediaLink,token)
-	r:=struct{
-		Upload_url string `json:"upload_url"`
-	}{}
+	req.Header.Add("Content-Type", "application/octet-stream")
+	r := Res{}
 	if reqErr != nil {
 		return "", fmt.Errorf("error during request for transcript link %v", reqErr)
 	}
-	 res, resErr := http.DefaultClient.Do(req)
-	 if resErr != nil {
-	 	return "", fmt.Errorf("error during request for transcript link %v", resErr)
-	 }
-	defer res.Body.Close()
-	if err:=json.NewDecoder(res.Body).Decode(&r);err!=nil{
-	 	return "", fmt.Errorf("error decoding transcript link %v", err)
+	res, resErr := http.DefaultClient.Do(req)
+	if resErr != nil {
+		return "", fmt.Errorf("error during request for transcript link %v", resErr)
 	}
-	 return r.Upload_url,nil
+	defer res.Body.Close()
+	if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
+		return "", fmt.Errorf("error decoding transcript link %v", err)
+	}
+	return r.Upload_url, nil
 }
 
 func getTranScriptID(payloadLink string) (string, error) {
