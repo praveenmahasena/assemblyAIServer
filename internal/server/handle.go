@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,22 +45,15 @@ type Res struct {
 	Upload_url string `json:"upload_url"`
 }
 
- type t []byte
- func (t t)Write(b []byte)(int,error){
-	fmt.Println(len(b))
-	t=b
-	return 0,nil
- }
-
 func handle(con net.Conn) {
 	defer con.Close()
 
+	var leng int64
+	binary.Read(con, binary.LittleEndian, &leng)
+	buf := bytes.NewBuffer([]byte{})
+	io.CopyN(buf, con, leng)
 
-	b,err:=io.ReadAll(con)
-	os.WriteFile("2.mp3",b,0777)
-
-
-	link, err := upLoadFile(nil)
+	link, err := upLoadFile(buf.Bytes())
 	if err != nil {
 		fmt.Println(err)
 		r := NewResponse(http.StatusInternalServerError, err.Error())
@@ -88,7 +82,6 @@ func handle(con net.Conn) {
 
 /* write docs for lsp */
 func upLoadFile(fb []byte) (string, error) {
-	fmt.Println(fb, "85")
 	mediaLink := os.Getenv(mediauploadlinkParam)
 	token := os.Getenv(tokenParam)
 	req, reqErr := http.NewRequest(http.MethodPost, mediaLink, bytes.NewReader(fb))
